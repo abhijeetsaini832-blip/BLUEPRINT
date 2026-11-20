@@ -823,6 +823,23 @@ class TestMotorOverload:
         r = flat_ground_2kg
         assert r["motor_overload_detected"] is False
 
+    def test_low_motor_torque_is_overloaded_by_rolling_resistance(self):
+        """Required motor torque must be compared with per-motor torque, not wheel torque."""
+        r = simulate_robot(
+            total_mass_kg=2.0,
+            motor_torque_nm=0.01,
+            motor_count=1,
+            wheel_radius_m=0.05,
+            slope_degrees=0.0,
+            traction_coefficient=0.7,
+            rolling_resistance_coefficient=0.03,
+            drivetrain_efficiency=0.85,
+            gear_ratio=1.0,
+        )
+        assert r["motor_overload_detected"] is True
+        assert r["motor_overload_ratio"] > OVERLOAD_RATIO_THRESHOLD
+        assert any("overload" in warning.lower() for warning in r["engineering_warnings"])
+
     def test_overload_detected_on_very_high_slope(self):
         """
         Force required to drive uphill may exceed the rated torque output.

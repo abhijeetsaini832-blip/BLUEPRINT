@@ -433,15 +433,28 @@ def simulate_robot(
     traction_limited = traction_limit_n < torque_limited_force_n
 
     # ── Motor overload detection ──────────────────────────────────────────
-    # Compare actual wheel torque required to deliver driving_force_n against
-    # the rated supply. If the torque required exceeds the rated supply by
-    # more than OVERLOAD_RATIO_THRESHOLD, flag overload.
-    overload_detected   = False
-    overload_ratio      = None
-    required_wheel_torque_nm = driving_force_n * wheel_radius_m
-    if effective_wheel_torque_nm > 0:
-        overload_ratio = round(required_wheel_torque_nm / effective_wheel_torque_nm, 4)
+    # Convert the modeled steady resistance back through gearing and efficiency
+    # to the required torque at each motor shaft, then compare it with the
+    # estimated torque available from that motor.
+    required_motor_torque_nm = (
+        total_resistance_n
+        * wheel_radius_m
+        / (
+            motor_count
+            * gear_ratio
+            * combined_efficiency
+        )
+    )
+    overload_detected = False
+    overload_ratio = None
+    if estimated_motor_torque_nm > 0:
+        overload_ratio = round(
+            required_motor_torque_nm / estimated_motor_torque_nm,
+            4,
+        )
         overload_detected = overload_ratio > OVERLOAD_RATIO_THRESHOLD
+    elif required_motor_torque_nm > 0:
+        overload_detected = True
 
     # ── Engineering warnings ──────────────────────────────────────────────
     warnings: list[str] = []
@@ -457,10 +470,16 @@ def simulate_robot(
             "Increase driven weight fraction or improve wheel grip."
         )
     if overload_detected:
-        warnings.append(
-            f"Motor overload detected: required torque is {overload_ratio:.2f}x the available "
-            f"wheel torque. Reduce load or increase motor torque."
-        )
+        if overload_ratio is not None:
+            warnings.append(
+                f"Motor overload detected: required torque is {overload_ratio:.2f}x the available "
+                f"motor torque. Reduce load or increase motor torque."
+            )
+        else:
+            warnings.append(
+                "Motor overload detected: resistance requires torque, but the estimated "
+                "motor torque is zero. Reduce load or increase motor torque."
+            )
     if slope_degrees > 60:
         warnings.append(
             f"Slope of {slope_degrees:.1f}° is very steep. Results are theoretical estimates only."
