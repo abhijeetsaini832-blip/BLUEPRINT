@@ -157,7 +157,18 @@ let transformMode = "translate";
 let simState = "idle";
 let simulationVersion = 0;
 let componentControlsWired = false;
-let keyboardDriveCode = null;
+let robotControlActive = false;
+const robotDriveKeys = new Set();
+const componentMoveKeys = new Set();
+let componentMoveFast = false;
+let componentMoveBefore = null;
+let componentMoveInvalidated = false;
+let transformHistoryBefore = null;
+const undoStack = [];
+const redoStack = [];
+const historyParts = new Set();
+const disposedParts = new WeakSet();
+const MAX_HISTORY = 50;
 
 const mats = {
   chassis: new THREE.MeshStandardMaterial({
@@ -322,6 +333,12 @@ function init() {
 
   transformControls.addEventListener("dragging-changed", event => {
     controls.enabled = !event.value;
+    if (event.value) {
+      transformHistoryBefore = captureDesignState();
+    } else if (transformHistoryBefore) {
+      recordHistory(transformHistoryBefore);
+      transformHistoryBefore = null;
+    }
   });
 
   transformControls.addEventListener("objectChange", () => {
@@ -563,6 +580,7 @@ function animate() {
   previousFrameTime = now;
   controls.update();
   updateActuators(delta);
+  applyComponentKeyboardMovement(delta);
   if (selectedOutline && selected) selectedOutline.setFromObject(selected.group);
   renderer.render(scene, camera);
 }
@@ -1587,7 +1605,185 @@ function invalidateSimulation() {
   }
 }
 
-function add(id, position) {
+function captureDesignState() {
+  return {
+    parts: parts.map(part => ({
+      part,
+      position: part.group.position.clone(),
+      rotation: part.group.rotation.clone(),
+      scale: part.group.scale.clone(),
+      basePosition: part.basePosition ? { ...part.basePosition } : null
+    })),
+    selectedId: selected?.instanceId || null
+  };
+}
+
+function sameDesignState(left, right) {
+  if (left.parts.length !== right.parts.length) return false;
+  return left.parts.every((entry, index) => {
+    const other = right.parts[index];
+    if (
+      entry.part !== other.part ||
+      !entry.position.equals(other.position) ||
+      !entry.rotation.equals(other.rotation) ||
+      !entry.scale.equals(other.scale)
+    ) {
+      return false;
+    }
+    if (!entry.basePosition || !other.basePosition) {
+      return entry.basePosition === other.basePosition;
+    }
+    return entry.basePosition.x === other.basePosition.x &&
+      entry.basePosition.y === other.basePosition.y &&
+      entry.basePosition.z === other.basePosition.z;
+  });
+}
+
+function cleanupHistoryParts() {
+  const retained = new Set(parts);
+  for (const entry of [...undoStack, ...redoStack]) {
+    for (const state of [entry.before, entry.after]) {
+      for (const item of state.parts) retained.add(item.part);
+    }
+  }
+  for (const part of historyParts) {
+    if (retained.has(part)) continue;
+    disposePart(part);
+    historyParts.delete(part);
+  }
+}
+
+function recordHistory(before) {
+  if (!before) return;
+  const after = captureDesignState();
+  if (sameDesignState(before, after)) return;
+
+  redoStack.length = 0;
+  const entry = { before, after };
+  undoStack.push(entry);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  for (const state of [before, after]) {
+    for (const item of state.parts) historyParts.add(item.part);
+  }
+  cleanupHistoryParts();
+}
+
+function restoreDesignState(state) {
+  invalidateSimulation();
+  const restoredParts = state.parts.map(item => item.part);
+  const restoredSet = new Set(restoredParts);
+
+  for (const part of parts) {
+    if (!restoredSet.has(part)) assemblyRoot.remove(part.group);
+  }
+  for (const item of state.parts) {
+    const { part } = item;
+    if (part.group.parent !== assemblyRoot) assemblyRoot.add(part.group);
+    part.group.position.copy(item.position);
+    part.group.rotation.copy(item.rotation);
+    part.group.scale.copy(item.scale);
+    part.basePosition = item.basePosition ? { ...item.basePosition } : null;
+  }
+
+  parts = restoredParts;
+  const largestId = parts.reduce((largest, part) => {
+    const match = /^part-(\d+)$/.exec(part.instanceId);
+    return match ? Math.max(largest, Number(match[1])) : largest;
+  }, 0);
+  nextId = Math.max(nextId, largestId + 1);
+  select(state.selectedId);
+  update();
+  render();
+}
+
+function undoDesignChange() {
+  const entry = undoStack.pop();
+  if (!entry) return false;
+  restoreDesignState(entry.before);
+  redoStack.push(entry);
+  cleanupHistoryParts();
+  return true;
+}
+
+function redoDesignChange() {
+  const entry = redoStack.pop();
+  if (!entry) return false;
+  restoreDesignState(entry.after);
+  undoStack.push(entry);
+  cleanupHistoryParts();
+  return true;
+}
+
+function finishComponentKeyboardMove() {
+  componentMoveKeys.clear();
+  componentMoveFast = false;
+  if (componentMoveBefore) recordHistory(componentMoveBefore);
+  componentMoveBefore = null;
+  componentMoveInvalidated = false;
+}
+
+function applyComponentKeyboardMovement(delta) {
+  if (
+    robotControlActive ||
+    !selected ||
+    !componentMoveKeys.size ||
+    transformControls?.dragging ||
+    !(delta > 0)
+  ) {
+    return;
+  }
+
+  const x = Number(componentMoveKeys.has("ArrowRight")) -
+    Number(componentMoveKeys.has("ArrowLeft"));
+  const z = Number(componentMoveKeys.has("ArrowDown")) -
+    Number(componentMoveKeys.has("ArrowUp"));
+  const magnitude = Math.hypot(x, z);
+  if (!magnitude) return;
+
+  const speed = componentMoveFast ? 6 : 2;
+  const step = speed * delta / magnitude;
+  const nextX = THREE.MathUtils.clamp(selected.group.position.x + x * step, -9, 9);
+  const nextZ = THREE.MathUtils.clamp(selected.group.position.z + z * step, -9, 9);
+  if (nextX === selected.group.position.x && nextZ === selected.group.position.z) {
+    return;
+  }
+
+  if (!componentMoveInvalidated) {
+    invalidateSimulation();
+    componentMoveInvalidated = true;
+  }
+  selected.group.position.set(nextX, selected.group.position.y, nextZ);
+  selected.basePosition = { x: nextX, y: selected.group.position.y, z: nextZ };
+}
+
+function updateControlModeStatus() {
+  const message = robotControlActive
+    ? "Robot Control Mode active — arrow keys or W A S D drive the robot."
+    : selected
+      ? "Component Mode — arrow keys move the selected component."
+      : "Standard Mode — select a component to move it with arrow keys.";
+  setText("control-mode-status", message);
+}
+
+function setRobotControlMode(active) {
+  const panel = $("movement-panel");
+  const next = !!active && !!panel && !panel.classList.contains("is-collapsed");
+  if (next === robotControlActive) return;
+
+  finishComponentKeyboardMove();
+  robotControlActive = next;
+  panel?.classList.toggle("is-active", robotControlActive);
+
+  if (robotControlActive) {
+    robotDriveKeys.clear();
+  } else if (robotDriveKeys.size) {
+    stopRobot();
+    setText("drive-status", "Robot stopped because Robot Control Mode was deactivated.");
+  }
+  updateControlModeStatus();
+}
+
+function add(id, position, trackHistory = true) {
   if (!scene) return;
 
   if (!catalog.some(component => component.id === id)) {
@@ -1595,6 +1791,7 @@ function add(id, position) {
     return;
   }
 
+  const historyBefore = trackHistory ? captureDesignState() : null;
   invalidateSimulation();
 
   const component = spec(id);
@@ -1648,6 +1845,7 @@ function add(id, position) {
 
   select(part.instanceId);
   update();
+  recordHistory(historyBefore);
 }
 
 function pick(event) {
@@ -1681,7 +1879,9 @@ function pick(event) {
 }
 
 function select(id) {
-  selected = parts.find(part => part.instanceId === id) || null;
+  const next = parts.find(part => part.instanceId === id) || null;
+  if (next !== selected) finishComponentKeyboardMove();
+  selected = next;
 
   setHidden("empty", !!selected);
   setHidden("inspector", !selected);
@@ -1700,6 +1900,7 @@ function select(id) {
 
   if (selectedOutline) selectedOutline.visible = !!selected;
   renderComponentControls();
+  updateControlModeStatus();
   render();
 }
 
@@ -2058,6 +2259,8 @@ function updateWheelSpeedReadouts() {
 
 // Frees GPU memory. Shared materials in `mats` are kept.
 function disposePart(part) {
+  if (disposedParts.has(part)) return;
+  disposedParts.add(part);
   const shared = new Set(Object.values(mats));
 
   part.group.traverse(object => {
@@ -2078,6 +2281,7 @@ function disposePart(part) {
 function removeSelected() {
   if (!selected || !scene) return;
 
+  const historyBefore = captureDesignState();
   invalidateSimulation();
 
   const removed = selected;
@@ -2085,15 +2289,16 @@ function removeSelected() {
   select(null);
 
   assemblyRoot.remove(removed.group);
-  disposePart(removed);
   parts = parts.filter(part => part !== removed);
 
   update();
+  recordHistory(historyBefore);
 }
 
 function duplicateSelected() {
   if (!selected || !scene) return;
 
+  const historyBefore = captureDesignState();
   const source = selected;
   const sourcePosition = source.group.position.clone();
   const sourceRotation = source.group.rotation.clone();
@@ -2104,7 +2309,7 @@ function duplicateSelected() {
     z: sourcePosition.z + 0.65
   };
 
-  add(source.componentId, position);
+  add(source.componentId, position, false);
   const duplicate = selected;
   if (!duplicate) return;
 
@@ -2141,9 +2346,11 @@ function duplicateSelected() {
 
   select(duplicate.instanceId);
   update();
+  recordHistory(historyBefore);
 }
 
 function resetMovement() {
+  const historyBefore = captureDesignState();
   stopTrajectoryPlayback(true);
   trajectoryPlayback = null;
   stopRobot();
@@ -2159,11 +2366,13 @@ function resetMovement() {
   updateWheelSpeedReadouts();
   setText("drive-status", "Movement reset; the assembly is at its starting pose.");
   render();
+  recordHistory(historyBefore);
 }
 
 function resetScene() {
   if (!scene) return;
 
+  const historyBefore = captureDesignState();
   stopTrajectoryPlayback(true);
   trajectoryPlayback = null;
   invalidateSimulation();
@@ -2171,7 +2380,6 @@ function resetScene() {
 
   for (const part of parts) {
     assemblyRoot.remove(part.group);
-    disposePart(part);
   }
 
   parts = [];
@@ -2194,6 +2402,7 @@ function resetScene() {
   setText("drive-status", "Robot stopped");
   setWarnings([], WARNINGS_NOT_RUN);
   setSimStatus("idle", "Scene reset. No simulation has been run.", null);
+  recordHistory(historyBefore);
 }
 
 // --------------------------------------------------
@@ -2915,7 +3124,7 @@ function stopRobot() {
     driveTimer = null;
   }
 
-  keyboardDriveCode = null;
+  robotDriveKeys.clear();
   currentDriveDirection = null;
   driveVelocity = 0;
   steeringInput = 0;
@@ -3060,79 +3269,139 @@ function driveRobot(direction) {
 
 document.querySelectorAll("[data-drive]").forEach(button => {
   button.addEventListener("click", () => {
-    keyboardDriveCode = null;
+    robotDriveKeys.clear();
     driveRobot(button.dataset.drive);
   });
 });
 
+const ROBOT_KEY_DIRECTIONS = {
+  KeyW: "forward",
+  ArrowUp: "forward",
+  KeyS: "backward",
+  ArrowDown: "backward",
+  KeyA: "left",
+  ArrowLeft: "left",
+  KeyD: "right",
+  ArrowRight: "right"
+};
+
+function isTextEntryFocused() {
+  const activeElement = document.activeElement;
+  return !!activeElement && (
+    activeElement.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName) ||
+    activeElement.getAttribute("role") === "textbox"
+  );
+}
+
+function updateRobotKeyboardDrive() {
+  const keys = [...robotDriveKeys].reverse();
+  const steering = keys
+    .map(code => ROBOT_KEY_DIRECTIONS[code])
+    .find(direction => direction === "left" || direction === "right");
+  if (!steering) {
+    steeringInput = 0;
+    applySteeringAngle(0);
+  }
+  const direction = steering || keys
+    .map(code => ROBOT_KEY_DIRECTIONS[code])
+    .find(value => value === "forward" || value === "backward");
+  if (direction) driveRobot(direction);
+}
+
 document.addEventListener("keydown", event => {
   const activeElement = document.activeElement;
-  const activeTag = activeElement?.tagName;
-  const textInputTypes = [
-    "text", "search", "email", "url", "password", "number", "tel"
-  ];
+  if (isTextEntryFocused()) return;
 
-  if (
-    activeElement?.isContentEditable ||
-    ["TEXTAREA", "SELECT"].includes(activeTag) ||
-    (activeTag === "INPUT" && textInputTypes.includes(activeElement.type))
-  ) {
-    return;
-  }
+  if (event.ctrlKey && !event.altKey) {
+    const key = event.key.toLowerCase();
+    if (key === "f" && !event.shiftKey) {
+      const search = $("component-search");
+      if (search) {
+        event.preventDefault();
+        const library = $("component-library");
+        if (
+          window.matchMedia("(max-width: 1023px)").matches &&
+          library && !library.classList.contains("mobile-open")
+        ) {
+          $("toggle-library")?.click();
+        }
+        search.focus();
+        search.select();
+      }
+      return;
+    }
 
-  if (
-    activeTag === "INPUT" &&
-    ["range", "color"].includes(activeElement.type) &&
-    event.key.startsWith("Arrow")
-  ) {
-    return;
+    if ((key === "z" && !event.shiftKey) || key === "y" ||
+        (key === "z" && event.shiftKey)) {
+      const redo = key === "y" || event.shiftKey;
+      if ((redo && redoStack.length) || (!redo && undoStack.length)) {
+        event.preventDefault();
+        if (redo) redoDesignChange();
+        else undoDesignChange();
+      }
+      return;
+    }
   }
-  if (
-    event.code === "Space" &&
-    (activeTag === "BUTTON" ||
-      (activeTag === "INPUT" && ["checkbox", "radio"].includes(activeElement.type)))
-  ) {
-    return;
-  }
-
-  if (!event.key) return;
 
   if (event.key === "Escape") {
+    setRobotControlMode(false);
     if (selected) select(null);
     closeMobilePanels();
+    const reference = document.querySelector(".keyboard-reference");
+    if (reference) reference.open = false;
     return;
   }
 
-  const keys = {
-    KeyW: "forward",
-    ArrowUp: "forward",
-    KeyS: "backward",
-    ArrowDown: "backward",
-    KeyA: "left",
-    ArrowLeft: "left",
-    KeyD: "right",
-    ArrowRight: "right"
-  };
+  if (robotControlActive) {
+    if (
+      event.code === "Space" &&
+      !activeElement?.matches("button, summary")
+    ) {
+      event.preventDefault();
+      driveRobot("stop");
+      return;
+    }
 
-  if (event.code === "Space") {
-    event.preventDefault();
-    driveRobot("stop");
+    if (ROBOT_KEY_DIRECTIONS[event.code]) {
+      event.preventDefault();
+      robotDriveKeys.add(event.code);
+      updateRobotKeyboardDrive();
+    }
     return;
   }
 
-  const direction = keys[event.code];
-
-  if (direction) {
+  if (
+    selected &&
+    ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)
+  ) {
     event.preventDefault();
-    keyboardDriveCode = event.code;
-    driveRobot(direction);
+    if (!componentMoveBefore) {
+      componentMoveBefore = captureDesignState();
+      componentMoveInvalidated = false;
+    }
+    componentMoveKeys.add(event.code);
+    componentMoveFast = event.shiftKey;
+  } else if (event.code === "Shift" && componentMoveKeys.size) {
+    componentMoveFast = true;
   }
 });
 
 document.addEventListener("keyup", event => {
-  if (event.code !== keyboardDriveCode) return;
-  stopRobot();
-  setText("drive-status", "Movement key released; robot stopped.");
+  if (componentMoveKeys.has(event.code)) {
+    componentMoveKeys.delete(event.code);
+    if (!componentMoveKeys.size) finishComponentKeyboardMove();
+  }
+  if (event.code === "Shift") componentMoveFast = false;
+
+  if (!robotDriveKeys.has(event.code)) return;
+  robotDriveKeys.delete(event.code);
+  if (robotDriveKeys.size) {
+    updateRobotKeyboardDrive();
+  } else {
+    stopRobot();
+    setText("drive-status", "Movement key released; robot stopped.");
+  }
 });
 
 function closeMobilePanels() {
@@ -3151,6 +3420,25 @@ function closeMobilePanels() {
 
 function setupWorkspaceActions() {
   const isMobile = () => window.matchMedia("(max-width: 1023px)").matches;
+  const movementPanel = $("movement-panel");
+  if (movementPanel) {
+    movementPanel.addEventListener("pointerdown", () => {
+      setRobotControlMode(true);
+    });
+    movementPanel.addEventListener("click", () => {
+      setRobotControlMode(true);
+    });
+    movementPanel.addEventListener("focusin", () => {
+      setRobotControlMode(true);
+    });
+    document.addEventListener("pointerdown", event => {
+      if (!movementPanel.contains(event.target)) setRobotControlMode(false);
+    });
+    document.addEventListener("focusin", event => {
+      if (!movementPanel.contains(event.target)) setRobotControlMode(false);
+    });
+  }
+
   const setDrawer = (panelId, buttonIds) => {
     const panel = $(panelId);
     if (!panel) return;
@@ -3217,7 +3505,8 @@ function setupWorkspaceActions() {
 }
 
 window.addEventListener("blur", () => {
-  if (!keyboardDriveCode) return;
+  finishComponentKeyboardMove();
+  if (!robotDriveKeys.size) return;
   stopRobot();
   setText("drive-status", "Robot stopped because the window lost focus.");
 });

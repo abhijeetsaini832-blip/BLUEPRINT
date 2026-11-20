@@ -117,11 +117,14 @@
     </aside>
 
     <section id="movement-panel" class="panel movement-controls workspace-panel"
-      aria-labelledby="movement-heading">
+      aria-labelledby="movement-heading" tabindex="0">
       <div class="workspace-panel-heading">
         <h2 id="movement-heading">Robot Movement</h2>
         <span class="movement-multiplier"><output id="drive-speed-value">0.50×</output></span>
       </div>
+      <p id="control-mode-status" class="control-mode-status" role="status" aria-live="polite">
+        Standard Mode — select a component to move it with arrow keys.
+      </p>
       <div class="drive-grid" aria-label="Movement controls">
         <button type="button" data-drive="forward" aria-label="Forward, W">W</button>
         <button type="button" data-drive="left" aria-label="Left, A">A</button>
@@ -133,6 +136,38 @@
         <input id="drive-speed" type="range" min="0" max="100" step="1" value="50">
       </label>
       <p id="drive-status" role="status" aria-live="polite">Robot stopped</p>
+      <details class="keyboard-reference">
+        <summary>Keyboard shortcuts</summary>
+        <div class="keyboard-reference-content">
+          <strong>General</strong>
+          <table>
+            <tbody>
+              <tr><th scope="row">Ctrl + C / V / X / A</th><td>Native browser editing</td></tr>
+              <tr><th scope="row">Ctrl + Z / Y</th><td>Undo / redo design changes</td></tr>
+              <tr><th scope="row">Ctrl + F</th><td>Focus component search</td></tr>
+              <tr><th scope="row">Ctrl + S</th><td>Design saving unavailable</td></tr>
+              <tr><th scope="row">Ctrl + H</th><td>Find and replace unavailable</td></tr>
+              <tr><th scope="row">Ctrl + Shift + P</th><td>Command Palette unavailable</td></tr>
+              <tr><th scope="row">Ctrl + `</th><td>Terminal unavailable</td></tr>
+              <tr><th scope="row">Escape</th><td>Deactivate / deselect</td></tr>
+            </tbody>
+          </table>
+          <strong>Component mode</strong>
+          <table>
+            <tbody>
+              <tr><th scope="row">Arrow keys</th><td>Move selected component</td></tr>
+              <tr><th scope="row">Shift + Arrow</th><td>Move faster</td></tr>
+            </tbody>
+          </table>
+          <strong>Robot mode</strong>
+          <table>
+            <tbody>
+              <tr><th scope="row">Arrow keys / W A S D</th><td>Drive / steer robot</td></tr>
+              <tr><th scope="row">Space</th><td>Stop robot</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </section>
 
     <section class="panel lab-controls lighting-panel workspace-panel"

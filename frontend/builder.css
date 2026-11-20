@@ -1721,6 +1721,90 @@ body.builder-workspace {
   margin-bottom: 8px;
 }
 
+.movement-controls {
+  max-height: calc(100dvh - 90px);
+  overflow-y: auto;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.movement-controls.is-active {
+  border-color: rgba(69, 214, 232, 0.72);
+  box-shadow: 0 0 0 1px rgba(69, 214, 232, 0.2),
+    0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+.control-mode-status {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(135, 166, 207, 0.18);
+  border-radius: 7px;
+  color: #a9bad0;
+  background: rgba(9, 17, 29, 0.56);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.movement-controls.is-active .control-mode-status {
+  border-color: rgba(69, 214, 232, 0.38);
+  color: #a9f1f7;
+}
+
+.keyboard-reference {
+  margin-top: 9px;
+  border-top: 1px solid rgba(135, 166, 207, 0.18);
+}
+
+.keyboard-reference summary {
+  padding: 8px 2px 3px;
+  color: #b9c9de;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.keyboard-reference summary:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.keyboard-reference-content {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  padding-bottom: 5px;
+}
+
+.keyboard-reference-content > strong {
+  display: block;
+  margin: 9px 0 4px;
+  color: #8edfea;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.keyboard-reference table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+}
+
+.keyboard-reference th,
+.keyboard-reference td {
+  padding: 4px 3px;
+  border-bottom: 1px solid rgba(135, 166, 207, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+
+.keyboard-reference th {
+  width: 48%;
+  color: #c3d3e8;
+  font-weight: 600;
+}
+
+.keyboard-reference td {
+  color: #91a2bb;
+}
+
 .movement-multiplier output {
   color: #82e1ed;
   font-variant-numeric: tabular-nums;
