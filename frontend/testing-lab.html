@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d17">
+  <title>BLUEPRINT | Robot Testing Lab</title>
+  <link rel="stylesheet" href="./testing-lab.css">
+</head>
+<body>
+  <header class="lab-header">
+    <a class="brand-lockup" href="./index.html" aria-label="BLUEPRINT dashboard">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span><b>BLUEPRINT</b><small>VIRTUAL ENGINEERING LAB</small></span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="./index.html">Dashboard</a>
+      <a href="./builder.html">Build</a>
+      <a class="active" href="./testing-lab.html" aria-current="page">Testing Lab</a>
+    </nav>
+    <span id="api-status" role="status">Connecting…</span>
+  </header>
+
+  <main class="lab-layout">
+    <section class="intro">
+      <p class="eyebrow">ENGINEERING TEST WORKSPACE</p>
+      <h1>Robot Testing Lab</h1>
+      <p>Run traceable analytical checks using an assembly saved from the BLUEPRINT builder. Results are model predictions, not hardware qualification.</p>
+    </section>
+
+    <section class="panel robot-panel" aria-labelledby="robot-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">ASSEMBLY</p><h2 id="robot-heading">Select a builder robot</h2></div>
+        <a class="button-link" href="./builder.html">Open Builder</a>
+      </div>
+      <label>Robot assembly
+        <select id="robot-select" aria-label="Robot assembly"></select>
+      </label>
+      <p id="robot-summary" class="hint" role="status">No saved builder assembly found. Open Build and use the Testing Lab link to save the current robot.</p>
+      <label>Campaign preset
+        <select id="campaign-select" aria-label="Test campaign">
+          <option value="">Custom test conditions</option>
+        </select>
+      </label>
+      <p class="hint">A preset selects terrain and gravity only; run each test module separately.</p>
+    </section>
+
+    <section class="panel terrain-panel" aria-labelledby="terrain-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHASE 1 · MOBILITY</p><h2 id="terrain-heading">Terrain and obstacle test</h2></div>
+        <span id="terrain-status" class="status-chip">NOT RUN</span>
+      </div>
+      <div class="form-grid">
+        <label>Terrain
+          <select id="terrain-type">
+            <option value="flat_concrete">Flat concrete</option><option value="rough_concrete">Rough concrete</option>
+            <option value="sand">Sand</option><option value="loose_soil">Loose soil</option>
+            <option value="gravel">Gravel</option><option value="rocky_terrain">Rocky terrain</option>
+            <option value="mud">Mud / soft soil</option><option value="lunar_regolith">Lunar regolith simulation</option>
+            <option value="martian_terrain">Martian terrain simulation</option>
+          </select>
+        </label>
+        <label>Gravity body
+          <select id="gravity-body">
+            <option value="9.81">Earth · 9.81 m/s²</option>
+            <option value="3.71">Mars · 3.71 m/s²</option>
+            <option value="1.62">Moon · 1.62 m/s²</option>
+          </select>
+        </label>
+        <label>Slope (degrees)
+          <input id="slope-degrees" type="number" min="-89" max="89" step="0.5" value="0">
+        </label>
+        <label>Friction coefficient <small>Optional terrain override</small>
+          <input id="friction" type="number" min="0" max="2" step="0.01" placeholder="Use terrain approximation">
+        </label>
+        <label>Rolling resistance <small>Optional terrain override</small>
+          <input id="rolling-resistance" type="number" min="0" max="1" step="0.01" placeholder="Use terrain approximation">
+        </label>
+        <label>Obstacle type
+          <select id="obstacle-type">
+            <option value="none">None</option><option value="small_rock">Small rock</option>
+            <option value="large_rock">Large rock</option><option value="ramp">Ramp</option>
+            <option value="step">Step</option><option value="trench">Trench</option>
+            <option value="crater">Crater</option><option value="uneven_ground">Uneven ground</option>
+            <option value="slope">Slope</option><option value="narrow_pathway">Narrow pathway</option>
+          </select>
+        </label>
+        <label>Obstacle height (m)<input id="obstacle-height" type="number" min="0" max="2" step="0.01" value="0"></label>
+        <label>Obstacle width (m)<input id="obstacle-width" type="number" min="0" max="5" step="0.01" value="0"></label>
+        <label>Test duration (s)<input id="terrain-duration" type="number" min="0.1" max="3600" step="0.1" value="10"></label>
+      </div>
+      <div class="actions">
+        <button id="start-terrain" class="primary" type="button">Start test</button>
+        <button id="pause-terrain" type="button" disabled>Pause</button>
+        <button id="resume-terrain" type="button" disabled>Resume</button>
+        <button id="reset-terrain" type="button">Reset</button>
+      </div>
+      <div class="simulation-workspace">
+        <canvas id="terrain-canvas" width="900" height="230" aria-label="Physics trajectory playback"></canvas>
+        <p id="playback-status" class="hint">1D playback uses the calculated trajectory. Obstacle contact and suspension are not modeled.</p>
+      </div>
+      <div id="terrain-metrics" class="metrics" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="payload-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHASE 2 · CAPACITY</p><h2 id="payload-heading">Payload sweep</h2></div>
+        <span id="payload-status" class="status-chip">NOT RUN</span>
+      </div>
+      <div class="form-grid">
+        <label>Preset payload
+          <select id="payload-preset">
+            <option value="0">0 kg</option><option value="1">1 kg</option><option value="5">5 kg</option>
+            <option value="10">10 kg</option><option value="20">20 kg</option><option value="50">50 kg</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label>Payload mass (kg)<input id="payload-mass" type="number" min="0" max="50" step="0.1" value="0"></label>
+        <label>Payload distribution
+          <select id="payload-distribution"><option value="centered">Centered</option><option value="front">Front</option><option value="rear">Rear</option><option value="left">Left</option><option value="right">Right</option><option value="custom">Custom</option></select>
+        </label>
+        <label>Payload X position (m)<input id="payload-x" type="number" step="any"></label>
+        <label>Payload Y position (m)<input id="payload-y" type="number" step="any"></label>
+        <label>Payload Z position (m)<input id="payload-z" type="number" step="any"></label>
+        <label>Capacity sweep step (kg)<input id="payload-step" type="number" min="0.01" max="5" step="0.01" value="0.1"></label>
+        <label>Safety margin (%)<input id="safety-margin" type="number" min="0" max="99" step="1" value="20"></label>
+      </div>
+      <button id="run-payload" type="button">Run payload sweep</button>
+      <div id="payload-metrics" class="metrics" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="structure-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHASE 3 · STRUCTURE</p><h2 id="structure-heading">Structural and pressure analysis</h2></div>
+        <span id="structural-status" class="status-chip">NOT RUN</span>
+      </div>
+      <div class="form-grid">
+        <label>Test type
+          <select id="structural-type">
+            <option value="compression">Compression</option><option value="tension">Tension</option>
+            <option value="bending">Bending</option><option value="wheel_pressure">Wheel-ground pressure</option>
+          </select>
+        </label>
+        <label>Material name<input id="material-name" type="text" maxlength="100" placeholder="User-specified material"></label>
+        <label>Density (kg/m³)<input id="material-density" type="number" min="0.001" step="any"></label>
+        <label>Yield strength (Pa)<input id="yield-strength" type="number" min="0.001" step="any"></label>
+        <label>Ultimate strength (Pa)<input id="ultimate-strength" type="number" min="0.001" step="any"></label>
+        <label>Applied load (N)<input id="structural-load" type="number" min="0.001" step="any"></label>
+        <label>Cross-section area (m²)<input id="structural-area" type="number" min="0.000001" step="any"></label>
+        <label>Member length (m)<input id="member-length" type="number" min="0.000001" step="any"></label>
+        <label>Young's modulus (Pa)<input id="youngs-modulus" type="number" min="0.001" step="any"></label>
+        <label>Allowable strength (Pa)<input id="allowable-strength" type="number" min="0.001" step="any"></label>
+        <label>Beam span (m)<input id="beam-span" type="number" min="0.000001" step="any"></label>
+        <label>Beam width (m)<input id="beam-width" type="number" min="0.000001" step="any"></label>
+        <label>Beam thickness (m)<input id="beam-thickness" type="number" min="0.000001" step="any"></label>
+        <label>Support assumption
+          <select id="support-condition"><option value="unsupported">Not specified</option><option value="simply_supported_center_load">Simply supported, center load</option></select>
+        </label>
+        <label>Wheel normal force (N)<input id="normal-force" type="number" min="0" step="any"></label>
+        <label>Wheel contact area (m²)<input id="contact-area" type="number" min="0.000001" step="any"></label>
+        <label>Allowable contact pressure (Pa)<input id="allowable-pressure" type="number" min="0.001" step="any"></label>
+      </div>
+      <button id="run-structural" type="button">Run structural test</button>
+      <div id="structural-metrics" class="metrics" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="environment-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHASE 4 · ENVIRONMENT</p><h2 id="environment-heading">Environmental exposure</h2></div>
+        <span id="environment-status" class="status-chip">NOT RUN</span>
+      </div>
+      <div class="form-grid">
+        <label>Scenario
+          <select id="environment-scenario">
+            <option value="cold">Cold</option><option value="normal">Normal</option><option value="hot">Hot</option>
+            <option value="temperature_cycling">Temperature cycling</option><option value="dust">Dust exposure</option>
+            <option value="sand">Sand exposure</option><option value="low_vibration">Low vibration</option>
+            <option value="medium_vibration">Medium vibration</option><option value="high_vibration">High vibration</option>
+            <option value="small_impact">Small impact</option><option value="medium_impact">Medium impact</option>
+            <option value="high_impact">High impact</option><option value="drop">Drop test</option>
+            <option value="reduced_pressure">Reduced pressure</option><option value="vacuum">Vacuum</option>
+          </select>
+        </label>
+        <label>Duration (s)<input id="environment-duration" type="number" min="0.1" max="86400" value="60"></label>
+        <label>Temperature (°C)<input id="environment-temperature" type="number" min="-273.15" max="1000" step="any"></label>
+        <label>Vibration acceleration (m/s²)<input id="vibration-acceleration" type="number" min="0" max="10000" step="any"></label>
+        <label>Impact energy (J)<input id="impact-energy" type="number" min="0" max="10000000" step="any"></label>
+        <label>Pressure (Pa)<input id="environment-pressure" type="number" min="0" max="100000000" step="any"></label>
+      </div>
+      <button id="run-environment" type="button">Record exposure test</button>
+      <div id="environment-metrics" class="metrics" aria-live="polite"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="endurance-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHASE 4 · POWER</p><h2 id="endurance-heading">Endurance estimate</h2></div>
+        <span id="endurance-status" class="status-chip">NOT RUN</span>
+      </div>
+      <div class="form-grid">
+        <label>Operating duration (s)<input id="endurance-duration" type="number" min="0.1" max="86400" value="3600"></label>
+        <label>Battery voltage (V)<input id="endurance-voltage" type="number" min="0.001" max="60" step="any" value="12"></label>
+        <label>Measured/assumed current (A)<input id="endurance-current" type="number" min="0" max="1000" step="any"></label>
+        <label>Battery capacity (Ah) <small>Enter manually; capacity is not in the component catalog</small><input id="battery-capacity" type="number" min="0.001" max="10000" step="any"></label>
+        <label>Travel speed (m/s)<input id="endurance-speed" type="number" min="0" max="100" step="any" value="0"></label>
+      </div>
+      <button id="run-endurance" type="button">Run endurance estimate</button>
+      <div id="endurance-metrics" class="metrics" aria-live="polite"></div>
+    </section>
+
+    <section class="panel report-panel" aria-labelledby="report-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">REPRODUCIBILITY</p><h2 id="report-heading">Test reports and history</h2></div>
+        <div class="actions"><button id="export-csv" type="button">Export CSV</button><button id="compare-tests" type="button">Compare latest</button></div>
+      </div>
+      <p id="comparison" class="hint" role="status"></p>
+      <div id="history-list" class="history-list"></div>
+      <details><summary>Latest report details</summary><pre id="report-json">No test report yet.</pre></details>
+    </section>
+  </main>
+  <script src="./testing-lab.js"></script>
+</body>
+</html>

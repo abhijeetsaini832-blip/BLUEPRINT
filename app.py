@@ -4,6 +4,7 @@
 
 import math
 from pathlib import Path
+from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,14 @@ from physics_engine import (
     MAX_TRAJECTORY_SAMPLES,
 )
 from engineering_analyzer import analyze_simulation
+from robot_testing import (
+    run_endurance_test,
+    run_environment_test,
+    run_payload_test,
+    run_structural_test,
+    run_terrain_test,
+    test_campaigns,
+)
 
 
 app = FastAPI(
@@ -263,6 +272,166 @@ class MotionSimulationRequest(SimulationRequest):
         return self
 
 
+class TestRequestModel(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_boolean_numbers(cls, data):
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, bool):
+                    raise ValueError(f"{key} cannot be a boolean.")
+        return data
+
+
+class TestRobotConfiguration(TestRequestModel):
+    total_mass_kg: float = Field(gt=0, le=100, allow_inf_nan=False)
+    motor_torque_nm: float = Field(ge=0, le=10, allow_inf_nan=False)
+    motor_count: int = Field(ge=1, le=20)
+    wheel_radius_m: float = Field(ge=0.005, le=0.5, allow_inf_nan=False)
+    wheel_count: int = Field(ge=1, le=32)
+    motor_rpm: float = Field(default=100, ge=0, le=10000, allow_inf_nan=False)
+    battery_voltage_v: float = Field(default=12, ge=1, le=60, allow_inf_nan=False)
+    gear_ratio: float = Field(default=1, ge=1, le=100, allow_inf_nan=False)
+    drivetrain_efficiency: float = Field(default=0.85, gt=0, le=1, allow_inf_nan=False)
+    gearbox_efficiency: float = Field(default=1, gt=0, le=1, allow_inf_nan=False)
+    driven_weight_fraction: float = Field(default=1, ge=0, le=1, allow_inf_nan=False)
+    gravity_m_s2: float = Field(default=9.81, gt=0, le=30, allow_inf_nan=False)
+    spec_notes: list[str] = Field(default_factory=list, max_length=50)
+    installed_component_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class TerrainTestRequest(TestRequestModel):
+    robot: TestRobotConfiguration
+    campaign_id: str | None = Field(default=None, max_length=100)
+    terrain_type: Literal[
+        "flat_concrete", "rough_concrete", "sand", "loose_soil", "gravel",
+        "rocky_terrain", "mud", "lunar_regolith", "martian_terrain",
+    ]
+    slope_degrees: float = Field(default=0, ge=-89, le=89, allow_inf_nan=False)
+    friction_coefficient: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    rolling_resistance_coefficient: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    obstacle_type: Literal[
+        "none", "small_rock", "large_rock", "ramp", "step", "trench",
+        "crater", "uneven_ground", "slope", "narrow_pathway",
+    ] = "none"
+    obstacle_height_m: float = Field(default=0, ge=0, le=2, allow_inf_nan=False)
+    obstacle_width_m: float = Field(default=0, ge=0, le=5, allow_inf_nan=False)
+    duration_s: float = Field(default=10, gt=0, le=3600, allow_inf_nan=False)
+
+
+class PayloadTestRequest(TestRequestModel):
+    robot: TestRobotConfiguration
+    campaign_id: str | None = Field(default=None, max_length=100)
+    payload_mass_kg: float = Field(ge=0, le=50, allow_inf_nan=False)
+    payload_position_x_m: float | None = Field(default=None, allow_inf_nan=False)
+    payload_position_y_m: float | None = Field(default=None, allow_inf_nan=False)
+    payload_position_z_m: float | None = Field(default=None, allow_inf_nan=False)
+    payload_distribution: Literal["centered", "front", "rear", "left", "right", "custom"] = "centered"
+    terrain_type: Literal[
+        "flat_concrete", "rough_concrete", "sand", "loose_soil", "gravel",
+        "rocky_terrain", "mud", "lunar_regolith", "martian_terrain",
+    ] = "flat_concrete"
+    slope_degrees: float = Field(default=0, ge=-89, le=89, allow_inf_nan=False)
+    friction_coefficient: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
+    rolling_resistance_coefficient: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    safety_margin_fraction: float = Field(default=0.2, ge=0, lt=1, allow_inf_nan=False)
+    sweep_step_kg: float = Field(default=0.1, gt=0, le=5, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_total_mass(self):
+        if self.robot.total_mass_kg + self.payload_mass_kg > 100:
+            raise ValueError("The combined robot and payload mass cannot exceed 100 kg in this model.")
+        return self
+
+
+class StructuralTestRequest(TestRequestModel):
+    test_type: Literal["compression", "tension", "bending", "wheel_pressure"]
+    robot: TestRobotConfiguration | None = None
+    material_name: str | None = Field(default=None, max_length=100)
+    density_kg_m3: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    yield_strength_pa: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    ultimate_strength_pa: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    load_force_n: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    cross_section_area_m2: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    member_length_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    youngs_modulus_pa: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    allowable_strength_pa: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    span_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    width_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    thickness_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    support_condition: Literal["simply_supported_center_load", "unsupported"] = "unsupported"
+    normal_force_n: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    contact_area_m2: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    allowable_contact_pressure_pa: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class EnvironmentTestRequest(TestRequestModel):
+    robot: TestRobotConfiguration | None = None
+    scenario: Literal[
+        "cold", "normal", "hot", "temperature_cycling", "dust", "sand",
+        "low_vibration", "medium_vibration", "high_vibration",
+        "small_impact", "medium_impact", "high_impact", "drop",
+        "reduced_pressure", "vacuum",
+    ]
+    duration_s: float = Field(default=60, gt=0, le=86400, allow_inf_nan=False)
+    temperature_c: float | None = Field(default=None, ge=-273.15, le=1000, allow_inf_nan=False)
+    vibration_acceleration_ms2: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
+    impact_energy_j: float | None = Field(default=None, ge=0, le=1e7, allow_inf_nan=False)
+    pressure_pa: float | None = Field(default=None, ge=0, le=1e8, allow_inf_nan=False)
+
+
+class EnduranceTestRequest(TestRequestModel):
+    robot: TestRobotConfiguration | None = None
+    duration_s: float = Field(gt=0, le=86400, allow_inf_nan=False)
+    voltage_v: float = Field(gt=0, le=60, allow_inf_nan=False)
+    current_a: float | None = Field(default=None, ge=0, le=1000, allow_inf_nan=False)
+    battery_capacity_ah: float | None = Field(default=None, gt=0, le=10000, allow_inf_nan=False)
+    speed_ms: float = Field(default=0, ge=0, le=100, allow_inf_nan=False)
+
+
+# ------------------------------------------
+# 6. Robot Testing Lab API
+# ------------------------------------------
+
+@app.get("/api/tests/campaigns")
+def list_test_campaigns():
+    return {"campaigns": test_campaigns()}
+
+
+@app.post("/api/tests/terrain")
+def test_terrain(request: TerrainTestRequest):
+    try:
+        return run_terrain_test(request)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+
+@app.post("/api/tests/payload")
+def test_payload(request: PayloadTestRequest):
+    try:
+        return run_payload_test(request)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+
+@app.post("/api/tests/structural")
+def test_structure(request: StructuralTestRequest):
+    try:
+        return run_structural_test(request)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+
+@app.post("/api/tests/environment")
+def test_environment(request: EnvironmentTestRequest):
+    return run_environment_test(request)
+
+
+@app.post("/api/tests/endurance")
+def test_endurance(request: EnduranceTestRequest):
+    return run_endurance_test(request)
+
+
 # ------------------------------------------
 # 4. Run simulation
 # ------------------------------------------
@@ -382,7 +551,7 @@ def run_motion_simulation(request: MotionSimulationRequest):
 
 
 # ------------------------------------------
-# 6. Frontend
+# 7. Frontend
 # ------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent

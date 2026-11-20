@@ -169,6 +169,7 @@ def simulate_robot(
     drag_coefficient: float = 0.0,
     frontal_area_m2: float = 0.1,
     operating_velocity_ms: float = 0.0,
+    gravity_m_s2: float = GRAVITY,
 ) -> dict:
     """
     Estimate robot forces, wheel speed, acceleration, and motor operating state.
@@ -262,6 +263,7 @@ def simulate_robot(
     drag_coefficient           = _validate_finite_number("drag_coefficient", drag_coefficient)
     frontal_area_m2            = _validate_finite_number("frontal_area_m2", frontal_area_m2)
     operating_velocity_ms      = _validate_finite_number("operating_velocity_ms", operating_velocity_ms)
+    gravity_m_s2               = _validate_finite_number("gravity_m_s2", gravity_m_s2)
 
     # Validate optional motor datasheet values
     optional_values = {
@@ -330,6 +332,8 @@ def simulate_robot(
         raise ValueError("frontal_area_m2 must be > 0.")
     if operating_velocity_ms < 0:
         raise ValueError("operating_velocity_ms must be >= 0.")
+    if not 0 < gravity_m_s2 <= 30:
+        raise ValueError("gravity_m_s2 must be greater than 0 and at most 30 m/s².")
 
     # ── Datasheet mode gate ────────────────────────────────────────────────
     supplied_specs = (
@@ -403,13 +407,13 @@ def simulate_robot(
 
     # ── Traction and resistance forces ────────────────────────────────────
     angle         = math.radians(slope_degrees)
-    normal_force  = total_mass_kg * GRAVITY * math.cos(angle)
+    normal_force  = total_mass_kg * gravity_m_s2 * math.cos(angle)
 
     traction_limit_n = traction_coefficient * normal_force * driven_weight_fraction
     driving_force_n  = min(torque_limited_force_n, traction_limit_n)
 
     # Gravity resistance: positive = resists uphill, negative = assists downhill
-    gravity_resistance_n = total_mass_kg * GRAVITY * math.sin(angle)
+    gravity_resistance_n = total_mass_kg * gravity_m_s2 * math.sin(angle)
 
     # Rolling resistance always opposes motion (positive value)
     rolling_resistance_n = rolling_resistance_coefficient * normal_force
@@ -478,6 +482,7 @@ def simulate_robot(
         "motor_count":     motor_count,
         "wheel_radius_m":  round(wheel_radius_m, 3),
         "slope_degrees":   round(slope_degrees, 3),
+        "gravity_m_s2":    round(gravity_m_s2, 4),
 
         # Motor model
         "motor_torque_model":        torque_model,
@@ -532,6 +537,7 @@ def simulate_robot(
             "Simplified linear DC motor torque-speed curve (datasheet mode only)",
             "Simplified Coulomb traction limit on driven wheels",
             "Constant rolling resistance coefficient (Crr)",
+            "Uniform gravitational acceleration supplied for the test environment",
             "Driven weight fraction is an estimate; axle load transfer not modelled",
             "Aerodynamic drag evaluated at the supplied operating_velocity_ms",
             "Gear ratio is motor RPM divided by wheel RPM",
@@ -586,6 +592,7 @@ def simulate_robot_motion(
     gearbox_efficiency: float = 1.0,
     drag_coefficient: float = 0.0,
     frontal_area_m2: float = 0.1,
+    gravity_m_s2: float = GRAVITY,
 ) -> dict:
     """
     Simulate time-based robot motion using Euler integration.
@@ -666,6 +673,7 @@ def simulate_robot_motion(
         gearbox_efficiency=gearbox_efficiency,
         drag_coefficient=drag_coefficient,
         frontal_area_m2=frontal_area_m2,
+        gravity_m_s2=gravity_m_s2,
         operating_velocity_ms=0.0,   # drag evaluated per step in Euler loop
     )
 
@@ -870,6 +878,7 @@ def simulate_robot_motion(
             "Trajectory samples capped at MAX_TRAJECTORY_SAMPLES to prevent memory exhaustion",
             "Aerodynamic drag recalculated every time step from current velocity",
             "Negative slope_degrees = downhill (gravity assists motion)",
+            "Uniform gravitational acceleration supplied for the test environment",
             "Component outputs are simulated estimates, not measured sensor readings",
         ],
     }

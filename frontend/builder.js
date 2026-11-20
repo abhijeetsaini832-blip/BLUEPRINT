@@ -2405,6 +2405,90 @@ function resetScene() {
   recordHistory(historyBefore);
 }
 
+function saveRobotConfigurationForTesting() {
+  const motorParts = parts.filter(
+    part => isMotorPart(part) && part.powered !== false
+  );
+  const wheelParts = parts.filter(isWheelPart);
+  const chassisPresent = parts.some(part => part.componentId === "chassis_basic");
+
+  if (!chassisPresent || !motorParts.length || !wheelParts.length) {
+    showError("Add a chassis, a powered motor and a wheel before opening the Testing Lab.");
+    return false;
+  }
+
+  const componentFor = part =>
+    catalog.find(component => component.id === part.componentId);
+  const installedIds = parts.map(part => part.componentId);
+  const batteries = parts.filter(part => componentFor(part)?.category === "power");
+  const specNotes = new Set();
+  const average = (installed, field, fallback, label) => {
+    const values = installed.map(part => {
+      const component = componentFor(part);
+      const value = Number(component?.[field]);
+      if (component?.[field] == null || !Number.isFinite(value) || value <= 0) {
+        specNotes.add(`Missing ${label} for ${part.componentId}; using ${fallback}.`);
+        return fallback;
+      }
+      if (component.spec_status !== "verified") {
+        specNotes.add(`${label} for ${part.componentId} is marked ${component.spec_status || "unknown"}, not verified.`);
+      }
+      return value;
+    });
+    if (new Set(installed.map(part => part.componentId)).size > 1) {
+      specNotes.add(`Mixed ${label} components are averaged.`);
+    }
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  };
+  const torque = average(motorParts, "max_torque_nm", 0.5, "motor torque");
+  const wheelRadius = average(wheelParts, "radius_m", 0.05, "wheel radius");
+  const batteryVoltage = batteries.length
+    ? average(batteries, "voltage_v", 12, "battery voltage")
+    : 12;
+  if (!batteries.length) specNotes.add("No battery component is installed; 12 V is a placeholder for the lab input.");
+  specNotes.add("Motor speed defaults to 100 RPM because the builder exposes no adjustable operating-speed control.");
+  specNotes.add("Drivetrain efficiency defaults to 85%; the builder does not configure drivetrain losses.");
+  const gearRatio = average(motorParts, "gear_ratio", 1, "gear ratio");
+
+  const snapshot = {
+    id: `${Date.now()}`,
+    name: `Builder assembly · ${new Date().toLocaleString()}`,
+    saved_at: new Date().toISOString(),
+    component_ids: installedIds,
+    configuration: {
+      total_mass_kg: Math.max(parts.reduce((sum, part) => sum + part.mass, 0), 0.01),
+      motor_torque_nm: torque,
+      motor_count: motorParts.length,
+      wheel_radius_m: wheelRadius,
+      wheel_count: wheelParts.length,
+      motor_rpm: 100,
+      battery_voltage_v: batteryVoltage,
+      gear_ratio: gearRatio,
+      gravity_m_s2: 9.81,
+      spec_notes: [...specNotes],
+      installed_component_ids: installedIds
+    }
+  };
+
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem("blueprint_testing_robots") || "[]");
+    if (!Array.isArray(saved)) saved = [];
+  } catch (error) {
+    console.error("Could not read saved Testing Lab assemblies:", error);
+  }
+  try {
+    localStorage.setItem(
+      "blueprint_testing_robots",
+      JSON.stringify([snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 10))
+    );
+  } catch (error) {
+    showError("Could not save the robot configuration for the Testing Lab: " + error.message);
+    return false;
+  }
+  return true;
+}
+
 // --------------------------------------------------
 // COMPONENT LIBRARY AND DRAG & DROP
 // --------------------------------------------------
@@ -3591,6 +3675,9 @@ if (missingIds.length) {
 }
 
 try {
+  on("testing-lab-link", "click", event => {
+    if (!saveRobotConfigurationForTesting()) event.preventDefault();
+  });
   setupSlopeInput();
   setupPanelResizing();
   init();
