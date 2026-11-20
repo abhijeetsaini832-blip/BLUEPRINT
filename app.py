@@ -123,7 +123,7 @@ class SimulationRequest(BaseModel):
         ge=0.005, le=0.5, allow_inf_nan=False
     )
     slope_degrees: float = Field(
-        default=0, ge=0, le=89, allow_inf_nan=False
+        default=0, ge=-89, le=89, allow_inf_nan=False
     )
 
     # Optional component catalogue selection.
@@ -157,6 +157,9 @@ class SimulationRequest(BaseModel):
     )
     drivetrain_efficiency: float = Field(
         default=0.85, gt=0, le=1, allow_inf_nan=False
+    )
+    gearbox_efficiency: float = Field(
+        default=1.0, gt=0, le=1, allow_inf_nan=False
     )
     traction_coefficient: float = Field(
         default=0.7, ge=0, le=2, allow_inf_nan=False
@@ -311,7 +314,7 @@ def run_simulation(request: SimulationRequest):
         return response
 
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error))
+        raise HTTPException(status_code=422, detail=str(error))
 
 
 # ------------------------------------------

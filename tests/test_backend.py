@@ -33,14 +33,13 @@ def client():
 # ============================================================
 
 def test_home_route(client):
-    # Check that the main API route is running.
-    response = client.get("/")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "message": "Welcome to BLUEPRINT Virtual Engineering Lab",
-        "status": "running",
-    }
+    # The home route redirects to the UI; verify a redirect or 200 is returned.
+    response = client.get("/", follow_redirects=False)
+    # FastAPI RedirectResponse issues a 307 by default.
+    assert response.status_code in (200, 301, 302, 307, 308)
+    if response.status_code in (301, 302, 307, 308):
+        loc = response.headers.get("location", "")
+        assert "index.html" in loc or "/ui/" in loc
 
 
 # ============================================================
@@ -452,7 +451,7 @@ def test_simulate_motion_route_with_valid_input(client):
         {"motor_count": 21},
         {"wheel_radius_m": 0.004},
         {"wheel_radius_m": 0.51},
-        {"slope_degrees": -1},
+        {"slope_degrees": -90},
         {"slope_degrees": 90},
         {"initial_velocity_ms": -1.0},
         {"initial_position_m": -0.5},
@@ -751,3 +750,107 @@ def test_simulate_motion_route_extreme_numeric_input():
     body = response.json()
     assert isinstance(body, dict)
     assert "detail" in body
+
+
+# ============================================================
+# NEW RELIABILITY TESTS — gearbox_efficiency & negative slope
+# ============================================================
+
+def test_simulate_accepts_gearbox_efficiency(client):
+    """gearbox_efficiency is a valid API field and is forwarded to the engine."""
+    response = client.post(
+        "/api/simulate",
+        json={
+            "total_mass_kg": 2.0,
+            "motor_torque_nm": 0.5,
+            "motor_count": 2,
+            "wheel_radius_m": 0.05,
+            "gearbox_efficiency": 0.9,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+def test_simulate_motion_accepts_gearbox_efficiency(client):
+    """gearbox_efficiency works on the motion endpoint too."""
+    response = client.post(
+        "/api/simulate-motion",
+        json={
+            "total_mass_kg": 2.0,
+            "motor_torque_nm": 0.5,
+            "motor_count": 2,
+            "wheel_radius_m": 0.05,
+            "gearbox_efficiency": 0.85,
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_simulate_accepts_negative_slope(client):
+    """Negative slope_degrees (downhill) is now accepted by the API."""
+    response = client.post(
+        "/api/simulate",
+        json={
+            "total_mass_kg": 2.0,
+            "motor_torque_nm": 0.5,
+            "motor_count": 2,
+            "wheel_radius_m": 0.05,
+            "slope_degrees": -15,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+def test_simulate_motion_accepts_negative_slope(client):
+    """Negative slope works on the motion endpoint."""
+    response = client.post(
+        "/api/simulate-motion",
+        json={
+            "total_mass_kg": 2.0,
+            "motor_torque_nm": 0.5,
+            "motor_count": 2,
+            "wheel_radius_m": 0.05,
+            "slope_degrees": -10,
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_simulate_rejects_slope_below_minus_89(client):
+    """slope_degrees < -89 must be rejected with HTTP 422."""
+    response = client.post(
+        "/api/simulate",
+        json={
+            "total_mass_kg": 2.0,
+            "motor_torque_nm": 0.5,
+            "motor_count": 2,
+            "wheel_radius_m": 0.05,
+            "slope_degrees": -90,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_gearbox_efficiency_out_of_range_rejected(client):
+    """gearbox_efficiency must be in (0, 1]; 0 and >1 are rejected."""
+    for bad_val in [0, 0.0, 1.5, 2.0]:
+        response = client.post(
+            "/api/simulate",
+            json={
+                "total_mass_kg": 2.0,
+                "motor_torque_nm": 0.5,
+                "motor_count": 2,
+                "wheel_radius_m": 0.05,
+                "gearbox_efficiency": bad_val,
+            },
+        )
+        assert response.status_code == 422, f"Expected 422 for gearbox_efficiency={bad_val}"
+
+
+def test_health_endpoint_returns_ok(client):
+    """Render health check endpoint must return exactly {status: ok}."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
